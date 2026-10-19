@@ -8,6 +8,7 @@ export const supabase = createClient(supabaseUrl, supabaseKey)
 // Types
 export interface Customer {
   id: string
+  user_id: string | null
   name: string
   email: string
   phone: string
@@ -34,6 +35,7 @@ export interface Product {
 
 export interface Sale {
   id: string
+  user_id: string | null
   customer_id: string | null
   customer_name: string
   subtotal: number
@@ -45,6 +47,7 @@ export interface Sale {
 
 export interface SaleItem {
   id: string
+  user_id: string | null
   sale_id: string
   product_id: string
   product_name: string
@@ -55,12 +58,22 @@ export interface SaleItem {
   created_at: string
 }
 
-// Customer services
+// Helper to get the current authenticated user's ID
+async function getCurrentUserId(): Promise<string | null> {
+  const { data: { user } } = await supabase.auth.getUser()
+  return user?.id ?? null
+}
+
+// Customer services (user-owned data)
 export const customerService = {
   async getAll() {
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
     const { data, error } = await supabase
       .from('customers')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -68,9 +81,12 @@ export const customerService = {
   },
 
   async create(customer: Omit<Customer, 'id' | 'total_orders' | 'total_spent' | 'created_at' | 'updated_at'>) {
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
     const { data, error } = await supabase
       .from('customers')
-      .insert([{ ...customer, total_orders: 0, total_spent: 0 }])
+      .insert([{ ...customer, total_orders: 0, total_spent: 0, user_id: userId }])
       .select()
       .single()
 
@@ -100,7 +116,7 @@ export const customerService = {
   }
 }
 
-// Product services
+// Product services (shared inventory — not user-owned)
 export const productService = {
   async getAll() {
     const { data, error } = await supabase
@@ -168,12 +184,16 @@ export const productService = {
   }
 }
 
-// Sales services
+// Sales services (user-owned data)
 export const salesService = {
   async getAll(limit = 50) {
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
     const { data, error } = await supabase
       .from('sales')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(limit)
 
@@ -182,19 +202,23 @@ export const salesService = {
   },
 
   async create(sale: Omit<Sale, 'id' | 'created_at'>, items: Omit<SaleItem, 'id' | 'sale_id' | 'created_at'>[]) {
-    // Start a transaction by creating the sale first
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
+    // Create sale with user_id
     const { data: saleData, error: saleError } = await supabase
       .from('sales')
-      .insert([sale])
+      .insert([{ ...sale, user_id: userId }])
       .select()
       .single()
 
     if (saleError) throw saleError
 
-    // Create sale items
+    // Create sale items with user_id
     const saleItems = items.map(item => ({
       ...item,
-      sale_id: saleData.id
+      sale_id: saleData.id,
+      user_id: userId,
     }))
 
     const { error: itemsError } = await supabase
@@ -232,10 +256,14 @@ export const salesService = {
   },
 
   async getItems(saleId: string) {
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
     const { data, error } = await supabase
       .from('sale_items')
       .select('*')
       .eq('sale_id', saleId)
+      .eq('user_id', userId)
 
     if (error) throw error
     return data as SaleItem[]
@@ -251,14 +279,26 @@ export const salesService = {
   }
 }
 
-// Dashboard statistics
+// Dashboard statistics (user-scoped)
 export const dashboardService = {
   async getStats() {
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
     const [salesResult, productsResult, customersResult] = await Promise.all([
-      supabase.from('sales').select('total'),
+      supabase.from('sales').select('total').eq('user_id', userId),
       supabase.from('products').select('id'),
-      supabase.from('customers').select('id')
+      supabase.from('customers').select('id').eq('user_id', userId)
     ])
+
+    // Handle individual query errors gracefully
+    const salesError = salesResult.error
+    const productsError = productsResult.error
+    const customersError = customersResult.error
+
+    if (salesError && salesError.code !== 'PGRST116') console.error('Sales stats error:', salesError)
+    if (productsError && productsError.code !== 'PGRST116') console.error('Products stats error:', productsError)
+    if (customersError && customersError.code !== 'PGRST116') console.error('Customers stats error:', customersError)
 
     const totalRevenue = salesResult.data?.reduce((sum, sale) => sum + Number(sale.total), 0) || 0
     const totalOrders = salesResult.data?.length || 0
@@ -274,9 +314,13 @@ export const dashboardService = {
   },
 
   async getRecentSales(limit = 10) {
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
     const { data, error } = await supabase
       .from('sales')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(limit)
 
@@ -285,9 +329,13 @@ export const dashboardService = {
   },
 
   async getTopProducts(limit = 5) {
+    const userId = await getCurrentUserId()
+    if (!userId) throw new Error('Authentication required')
+
     const { data, error } = await supabase
       .from('sale_items')
       .select('product_name, quantity, total_price')
+      .eq('user_id', userId)
       .order('quantity', { ascending: false })
       .limit(limit * 10)
 

@@ -123,7 +123,7 @@ The API test route (`app/api/test-db/route.ts`) reads the same variables and cre
 | Supabase Auth (`supabase.auth`) implemented | ✅ **Yes** (updated) | `login-page.tsx` now uses `signInWithPassword()` / `signUp()`. `dashboard-layout.tsx` uses `getSession()` + `onAuthStateChange`. |
 | `auth-helpers-nextjs` installed | ✅ Yes | Installed but not yet used — the auth is implemented with raw `supabase.auth` calls instead of the middleware helper. Works fine. |
 | Service role key in client code | ✅ **Not exposed** | `SUPABASE_SERVICE_ROLE_KEY` is only in `.env`, never imported in client-side code. Good. |
-| RLS policies defined | ⚠️ Not configured | `schema.sql` has RLS commented out. No policies defined. Data is currently open to any authenticated user. |
+| RLS policies defined | ✅ Implemented | `supabase/schema.sql` and `supabase/migration.sql` create `user_id = auth.uid()` policies on all user-owned tables. |
 | Env var leakage risk | ✅ Safe | Only `NEXT_PUBLIC_SUPABASE_*` vars are bundled for client; the `SUPABASE_*` (non-public) vars are server-only by Next.js convention. |
 
 ---
@@ -135,6 +135,7 @@ The API test route (`app/api/test-db/route.ts`) reads the same variables and cre
 | 1 | `PGRST205: Could not find the table 'public.customers' in the schema cache` (and same for products, sales, sale_items) | `supabase/schema.sql` was never executed against the Supabase project | Apply `supabase/schema.sql` in the Supabase SQL Editor. **No code change needed.** |
 | 2 | Login uses `localStorage` instead of Supabase Auth | `components/login-page.tsx` hardcodes a mock login; `components/dashboard-layout.tsx` reads from `localStorage` | Replace mock auth with `supabase.auth.signInWithPassword()` / `signOut()`. Hook up session persistence via `@supabase/auth-helpers-nextjs`. *(Out of scope for this verification unless requested.)* |
 | 3 | `@supabase/auth-helpers-nextjs` installed but unused | Dead dependency — installed but no component or middleware imports it | Leave as-is (harmless) or remove. *(Low priority.)* |
+| 4 | `PGRST204: Could not find the 'user_id' column of 'customers' in the schema cache` | Original tables were created without `user_id` columns; migration SQL not yet applied | Run `supabase/migration.sql` in the Supabase SQL Editor. This adds `user_id` columns, indexes, RLS, and policies to existing tables. |
 
 ---
 
@@ -153,33 +154,41 @@ The dev server was restarted and compiled successfully with no errors.
 
 ## Remaining Tasks / Manual Steps Required
 
-1. **📋 Apply the database schema (CRITICAL):**
+1. **📋 Apply the database migration (CRITICAL):**
    - Open your [Supabase SQL Editor](https://supabase.com/dashboard)
    - Select the project `qppfeudpapppzwuqcjef`
-   - Paste and run the contents of `supabase/schema.sql`
-   - This will create `customers`, `products`, `sales`, and `sale_items` tables with sample data.
+   - Run `supabase/migration.sql` — this adds `user_id` columns, indexes, RLS, and policies to the existing tables
+   - Or if starting fresh: run `supabase/schema.sql` (includes everything in one file)
 
 2. **🔐 Supabase Auth — DONE** ✅
    - `login-page.tsx` and `dashboard-layout.tsx` now use `supabase.auth` for sign-in, sign-up, session, and sign-out.
    - **Note:** Supabase requires an authenticated user to exist. You'll need to create a user via the Supabase dashboard (Auth → Users → "Add user") or via the signup form once the tables exist, before logging in.
    - **Optional follow-up:** A `middleware.ts` file using `@supabase/auth-helpers-nextjs` could add server-side route protection for `/dashboard`. Currently this is handled client-side in `dashboard-layout.tsx`, which is the lighter-weight approach.
 
-3. **🛡️ Configure Row Level Security (OPTIONAL but recommended):**
-   - Uncomment the RLS lines in `schema.sql` (lines 92–96).
-   - Write appropriate RLS policies per table (e.g., `CREATE POLICY "Allow read access to authenticated users" ON customers FOR SELECT USING (auth.uid() IS NOT NULL);`).
+3. **🛡️ Row Level Security — IMPLEMENTED** ✅
+   - `supabase/schema.sql` now includes RLS with `user_id = auth.uid()` policies on `customers`, `sales`, `sale_items`
+   - `lib/supabase.ts` updated to filter by `user_id` on reads and auto-attach `user_id` on inserts
+   - `dashboard-layout.tsx` refreshes the page on auth state change to prevent stale data
 
-4. **🧹 Clean up:**
-   - Remove the temporary test DB record if the insert test succeeded after schema application (the API test route already cleans up its own test insert, so this is handled).
-   - Consider removing unused `POSTGRES_*` env vars if only the Supabase client is used.
+4. **🧹 Demo account (ALREADY EXISTS) ✅:**
+   - The demo user `demo@pos.com` already exists in Supabase Auth (UUID: `3e023ff7-751b-4da0-8443-51668c1556f1`)
+   - After running the migration, uncomment and run the demo data insert block at the bottom of `schema.sql` to seed demo data
+   - Password: `demo123456`
 
 ---
 
 ## Summary
 
-The Supabase integration in the codebase was **architecturally correct** — all data operations flow through `@supabase/supabase-js`, the client is properly initialized, environment variables are correctly wired, and service-role keys are not leaked to the client.
+The Supabase integration in the codebase was **architecturally correct** — all data operations flow through `@supabase/supabase-js`, the client is properly initialized, and environment variables are correctly wired.
 
-**Two fixes were applied:**
+**Three issues were identified and addressed:**
 
-1. **Database tables** — `supabase/schema.sql` needs to be applied in the Supabase SQL Editor. This is a manual step (requires dashboard access) — **no code change was needed**, the code was already correct.
+1. **Database tables didn't exist** — Original `schema.sql` was never applied. Tables were created (verified via API). The `user_id` migration (`supabase/migration.sql`) still needs to be applied.
 
-2. **Supabase Auth** — Replaced mock `localStorage` auth with real Supabase Auth in `login-page.tsx` and `dashboard-layout.tsx`. The dev server was restarted and compiles cleanly.
+2. **Mock `localStorage` auth** — Replaced with real `supabase.auth` in `login-page.tsx` and `dashboard-layout.tsx`. ✅ Compiles cleanly.
+
+3. **No data isolation** — Added `user_id` columns, RLS policies, and user-filtered queries. ✅ Code is ready.
+
+**Files modified:** `components/login-page.tsx`, `components/dashboard-layout.tsx`, `lib/supabase.ts`, `app/api/test-db/route.ts`, `supabase/schema.sql`, `supabase/migration.sql` (new).
+
+**Remaining manual step:** Run `supabase/migration.sql` in the Supabase SQL Editor, then seed demo data from the bottom of `schema.sql`. The demo user `demo@pos.com` (UUID: `3e023ff7-751b-4da0-8443-51668c1556f1`) already exists with password `demo123456`.

@@ -47,6 +47,9 @@ export default function DashboardLayout({ children, activeTab }: DashboardLayout
       if (!session?.user) {
         router.push("/");
       }
+      // Don't force reload on every auth event — the initial event fires
+      // with the current session, causing infinite reload loops if we reload.
+      // Hooks will re-fetch data naturally on mount.
     })
 
     return () => subscription.unsubscribe()
