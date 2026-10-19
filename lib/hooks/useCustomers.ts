@@ -24,7 +24,7 @@ export function useCustomers() {
     fetchCustomers()
   }, [])
 
-  const addCustomer = async (customer: Omit<Customer, 'id' | 'total_orders' | 'total_spent' | 'created_at' | 'updated_at'>) => {
+  const addCustomer = async (customer: Omit<Customer, 'id' | 'user_id' | 'total_orders' | 'total_spent' | 'created_at' | 'updated_at'>) => {
     try {
       const newCustomer = await customerService.create(customer)
       setCustomers([newCustomer, ...customers])

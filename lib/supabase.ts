@@ -80,7 +80,8 @@ export const customerService = {
     return data as Customer[]
   },
 
-  async create(customer: Omit<Customer, 'id' | 'total_orders' | 'total_spent' | 'created_at' | 'updated_at'>) {
+  // user_id is injected from the authenticated session below — callers must not supply it.
+  async create(customer: Omit<Customer, 'id' | 'user_id' | 'total_orders' | 'total_spent' | 'created_at' | 'updated_at'>) {
     const userId = await getCurrentUserId()
     if (!userId) throw new Error('Authentication required')
 
@@ -201,7 +202,8 @@ export const salesService = {
     return data as Sale[]
   },
 
-  async create(sale: Omit<Sale, 'id' | 'created_at'>, items: Omit<SaleItem, 'id' | 'sale_id' | 'created_at'>[]) {
+  // user_id is injected from the authenticated session below — callers must not supply it.
+  async create(sale: Omit<Sale, 'id' | 'user_id' | 'created_at'>, items: Omit<SaleItem, 'id' | 'user_id' | 'sale_id' | 'created_at'>[]) {
     const userId = await getCurrentUserId()
     if (!userId) throw new Error('Authentication required')
 

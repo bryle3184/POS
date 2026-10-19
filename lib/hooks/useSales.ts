@@ -24,7 +24,7 @@ export function useSales() {
     fetchSales()
   }, [])
 
-  const createSale = async (sale: Omit<Sale, 'id' | 'created_at'>, items: Omit<SaleItem, 'id' | 'sale_id' | 'created_at'>[]) => {
+  const createSale = async (sale: Omit<Sale, 'id' | 'user_id' | 'created_at'>, items: Omit<SaleItem, 'id' | 'user_id' | 'sale_id' | 'created_at'>[]) => {
     try {
       const newSale = await salesService.create(sale, items)
       setSales([newSale, ...sales])
